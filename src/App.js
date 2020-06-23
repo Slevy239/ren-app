@@ -1,11 +1,12 @@
 import React from 'react';
+import GatewayJS from "@renproject/gateway";
 import Web3 from "web3";
 import './App.css';
 
 import ABI from "./ABI.json";
 
 // Replace with your contract's address.
-const contractAddress = "0x3Aa969d343BD6AE66c4027Bb61A382DC96e88150";
+const contractAddress = "0xbc628665E3a0b25978b19CEf4fbfFf59C33062F5";
 
 class App extends React.Component {
   constructor(props) {
@@ -14,6 +15,7 @@ class App extends React.Component {
       balance: 0,
       message: "",
       error: "",
+      gatewayJS: new GatewayJS("testnet"),
     }
   }
 
@@ -59,6 +61,8 @@ class App extends React.Component {
         this.updateBalance();
       }, 10 * 1000);
     });
+
+    this.recoverTransfers().catch(this.logError);
   }
 
   render = () => {
@@ -91,13 +95,90 @@ class App extends React.Component {
   }
 
   deposit = async () => {
-    this.logError("");
-    // TODO
+    const { web3, gatewayJS } = this.state;
+    const amount = 0.001; // BTC
+
+    try {
+      await gatewayJS.open({
+        // Send BTC from the Bitcoin blockchain to the Ethereum blockchain.
+        sendToken: GatewayJS.Tokens.BTC.Btc2Eth,
+
+        // Amount of BTC we are sending (in Satoshis)
+        suggestedAmount: Math.floor(amount * (10 ** 8)), // Convert to Satoshis
+
+        // The contract we want to interact with
+        sendTo: contractAddress,
+
+        // The name of the function we want to call
+        contractFn: "deposit",
+
+        // The nonce is used to guarantee a unique deposit address
+        nonce: GatewayJS.utils.randomNonce(),
+
+        // Arguments expected for calling `deposit`
+        contractParams: [
+          {
+            name: "_msg",
+            type: "bytes",
+            value: web3.utils.fromAscii(`Depositing ${amount} BTC`),
+          }
+        ],
+
+        // Web3 provider for submitting mint to Ethereum
+        web3Provider: web3.currentProvider,
+      }).result();
+      this.log(`Deposited ${amount} BTC.`);
+    } catch (error) {
+      // Handle error
+      this.logError(error);
+    }
   }
 
   withdraw = async () => {
-    this.logError("");
-    // TODO
+    const { web3, gatewayJS, balance } = this.state;
+
+    const amount = balance;
+    const recipient = prompt("Enter BTC recipient:");
+
+    // You can surround shiftOut with a try/catch to handle errors.
+
+    await gatewayJS.open({
+      // Send BTC from the Ethereum blockchain to the Bitcoin blockchain.
+      // This is the reverse of shitIn.
+      sendToken: GatewayJS.Tokens.BTC.Eth2Btc,
+
+      // The contract we want to interact with
+      sendTo: contractAddress,
+
+      // The name of the function we want to call
+      contractFn: "withdraw",
+
+      // Arguments expected for calling `deposit`
+      contractParams: [
+        { name: "_msg", type: "bytes", value: web3.utils.fromAscii(`Withdrawing ${amount} BTC`) },
+        { name: "_to", type: "bytes", value: "0x" + Buffer.from(recipient).toString("hex") },
+        { name: "_amount", type: "uint256", value: Math.floor(amount * (10 ** 8)) },
+      ],
+
+      // Web3 provider for submitting burn to Ethereum
+      web3Provider: web3.currentProvider,
+    }).result();
+
+    this.log(`Withdrew ${amount} BTC to ${recipient}.`);
+  }
+
+  recoverTransfers = async () => {
+    const { web3, gatewayJS } = this.state;
+    // Load previous transfers from local storage
+    const previousGateways = await gatewayJS.getGateways();
+    // Resume each transfer
+    for (const transfer of Array.from(previousGateways.values())) {
+      gatewayJS
+        .recoverTransfer(web3.currentProvider, transfer)
+        .pause()
+        .result()
+        .catch(this.logError);
+    }
   }
 }
 
